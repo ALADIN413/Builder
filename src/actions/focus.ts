@@ -1,0 +1,51 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { prisma } from "@/lib/prisma";
+import { fromDateKey } from "@/lib/date";
+import { focusSessionInputSchema } from "@/lib/validations";
+import { safeParse, type ActionResult } from "./helpers";
+
+export async function createFocusSession(raw: unknown): Promise<ActionResult> {
+  const parsed = safeParse(focusSessionInputSchema, raw);
+  if (!parsed.ok) return parsed;
+
+  const input = parsed.data;
+  const date = fromDateKey(input.date);
+  const start = new Date(date);
+  const end = new Date(date);
+
+  await prisma.focusSession.create({
+    data: {
+      date,
+      startTime: start,
+      endTime: new Date(start.getTime() + input.durationMinutes * 60_000),
+      durationMinutes: input.durationMinutes,
+      objective: input.objective.trim(),
+      accomplishment: input.accomplishment?.trim() || null,
+      output: input.output?.trim() || null,
+      blocker: input.blocker?.trim() || null,
+      focusScore: input.focusScore ?? null,
+      evidenceUrl: input.evidenceUrl?.trim() || null,
+      evidenceType: input.evidenceUrl ? (input.evidenceType ?? "LIVE_PRODUCT") : null,
+    },
+  });
+
+  const sessions = await prisma.focusSession.findMany({
+    where: { date: { gte: start, lte: end } },
+    select: { durationMinutes: true },
+  });
+  const total = sessions.reduce((acc, s) => acc + s.durationMinutes, 0);
+
+  await prisma.dailyLog.upsert({
+    where: { date },
+    create: { date, deepWorkMinutes: total, primaryObjective: "" },
+    update: { deepWorkMinutes: total },
+  });
+
+  revalidatePath("/");
+  revalidatePath("/focus");
+  revalidatePath("/daily");
+  revalidatePath("/reviews");
+  return { ok: true };
+}
