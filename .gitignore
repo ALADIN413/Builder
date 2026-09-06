@@ -38,6 +38,10 @@ yarn-error.log*
 /dev.db-journal
 /dev.db-wal
 /dev.db-shm
+/test.db
+/test.db-journal
+/test.db-wal
+/test.db-shm
 
 # vercel
 .vercel

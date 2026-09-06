@@ -37,10 +37,17 @@ export async function createFocusSession(raw: unknown): Promise<ActionResult> {
   });
   const total = sessions.reduce((acc, s) => acc + s.durationMinutes, 0);
 
+  const existingLog = await prisma.dailyLog.findUnique({ where: { date } });
+  const deepWorkMinutes = Math.max(existingLog?.deepWorkMinutes ?? 0, total);
+
   await prisma.dailyLog.upsert({
     where: { date },
-    create: { date, deepWorkMinutes: total, primaryObjective: "" },
-    update: { deepWorkMinutes: total },
+    create: {
+      date,
+      deepWorkMinutes,
+      primaryObjective: existingLog?.primaryObjective ?? "",
+    },
+    update: { deepWorkMinutes },
   });
 
   revalidatePath("/");

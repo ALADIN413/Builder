@@ -57,6 +57,9 @@ export async function computeMonthlyReview(
     return { ok: false, error: "Invalid month" };
   }
   const [y, m] = month.split("-").map(Number);
+  if (Number.isNaN(y) || Number.isNaN(m) || m < 1 || m > 12) {
+    return { ok: false, error: "Invalid month" };
+  }
   const start = new Date(y, m - 1, 1, 0, 0, 0, 0);
   const end = new Date(y, m, 0, 23, 59, 59, 999);
 
