@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { prisma } from "@/lib/prisma";
+import { requireUser, resolveViewer } from "@/lib/auth";
 import { toDateKey } from "@/lib/date";
 import { addDays, subDays } from "date-fns";
 import { BusinessMetricForm } from "@/components/business/business-metric-form";
@@ -9,13 +10,20 @@ import { Panel } from "@/components/ui/panel";
 
 export const metadata: Metadata = { title: "Business" };
 
-export default async function BusinessPage() {
+export default async function BusinessPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ view?: string }>;
+}) {
+  const current = await requireUser();
+  const { user, isSelf } = await resolveViewer(await searchParams, current);
+
   const today = new Date();
   const start = subDays(today, 29);
   const end = addDays(today, 1);
 
   const rows = await prisma.businessMetric.findMany({
-    where: { date: { gte: start, lt: end } },
+    where: { userId: user.id, date: { gte: start, lt: end } },
     orderBy: { date: "asc" },
   });
 
@@ -85,6 +93,7 @@ export default async function BusinessPage() {
 
         <div className="h-fit lg:sticky lg:top-6">
           <BusinessMetricForm
+            readOnly={!isSelf}
             initial={{
               revenue: todayRow?.revenue ?? 0,
               retention: todayRow?.retention ?? 0,

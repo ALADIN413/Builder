@@ -1,5 +1,11 @@
-import { AppShellContent } from "./app-shell-content";
+import { AppShellContent, type ShellSession } from "./app-shell-content";
 
-export function AppShell({ children }: { children: React.ReactNode }) {
-  return <AppShellContent>{children}</AppShellContent>;
+export function AppShell({
+  session,
+  children,
+}: {
+  session: ShellSession;
+  children: React.ReactNode;
+}) {
+  return <AppShellContent session={session}>{children}</AppShellContent>;
 }

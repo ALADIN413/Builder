@@ -2,12 +2,16 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
-import { toDateKey } from "@/lib/date";
-import type { ActionResult } from "./helpers";
+import { toDateKey, fromDateKey } from "@/lib/date";
+import { requireUser } from "@/lib/auth";
+import { safeParse, type ActionResult } from "./helpers";
+import { z } from "zod";
 
 export async function exportAll(): Promise<
   ActionResult<Record<string, unknown>>
 > {
+  const user = await requireUser();
+  const uid = user.id;
   const [
     dailyLogs,
     focusSessions,
@@ -21,23 +25,32 @@ export async function exportAll(): Promise<
     monthlyReviews,
     evidence,
   ] = await Promise.all([
-    prisma.dailyLog.findMany(),
-    prisma.focusSession.findMany(),
-    prisma.distraction.findMany(),
-    prisma.skill.findMany(),
-    prisma.skillEvidence.findMany(),
-    prisma.project.findMany(),
-    prisma.projectMilestone.findMany(),
-    prisma.businessMetric.findMany(),
-    prisma.weeklyReview.findMany(),
-    prisma.monthlyReview.findMany(),
-    prisma.evidence.findMany(),
+    prisma.dailyLog.findMany({ where: { userId: uid } }),
+    prisma.focusSession.findMany({ where: { userId: uid } }),
+    prisma.distraction.findMany({ where: { userId: uid } }),
+    prisma.skill.findMany({ where: { userId: uid } }),
+    prisma.skillEvidence.findMany({
+      where: { skill: { userId: uid } },
+    }),
+    prisma.project.findMany({ where: { userId: uid } }),
+    prisma.projectMilestone.findMany({
+      where: { project: { userId: uid } },
+    }),
+    prisma.businessMetric.findMany({ where: { userId: uid } }),
+    prisma.weeklyReview.findMany({ where: { userId: uid } }),
+    prisma.monthlyReview.findMany({ where: { userId: uid } }),
+    prisma.evidence.findMany({ where: { userId: uid } }),
   ]);
 
   return {
     ok: true,
     data: {
-      meta: { exporter: "founder-os", version: 1, exportedAt: new Date().toISOString() },
+      meta: {
+        exporter: "founder-os",
+        version: 2,
+        exportedAt: new Date().toISOString(),
+        profile: { name: user.name, emoji: user.emoji },
+      },
       dailyLogs,
       focusSessions,
       distractions,
@@ -54,61 +67,23 @@ export async function exportAll(): Promise<
 }
 
 export async function clearAll(): Promise<ActionResult> {
+  const user = await requireUser();
   await prisma.$transaction([
-    prisma.evidence.deleteMany(),
-    prisma.skillEvidence.deleteMany(),
-    prisma.projectMilestone.deleteMany(),
-    prisma.weeklyReview.deleteMany(),
-    prisma.monthlyReview.deleteMany(),
-    prisma.businessMetric.deleteMany(),
-    prisma.distraction.deleteMany(),
-    prisma.focusSession.deleteMany(),
-    prisma.dailyLog.deleteMany(),
-    prisma.project.deleteMany(),
-    prisma.skill.deleteMany(),
+    prisma.evidence.deleteMany({ where: { userId: user.id } }),
+    prisma.skillEvidence.deleteMany({ where: { skill: { userId: user.id } } }),
+    prisma.projectMilestone.deleteMany({ where: { project: { userId: user.id } } }),
+    prisma.weeklyReview.deleteMany({ where: { userId: user.id } }),
+    prisma.monthlyReview.deleteMany({ where: { userId: user.id } }),
+    prisma.businessMetric.deleteMany({ where: { userId: user.id } }),
+    prisma.distraction.deleteMany({ where: { userId: user.id } }),
+    prisma.focusSession.deleteMany({ where: { userId: user.id } }),
+    prisma.dailyLog.deleteMany({ where: { userId: user.id } }),
+    prisma.project.deleteMany({ where: { userId: user.id } }),
+    prisma.skill.deleteMany({ where: { userId: user.id } }),
   ]);
   revalidatePath("/", "layout");
   return { ok: true };
 }
-
-type ModelName =
-  | "evidence"
-  | "skillEvidence"
-  | "projectMilestone"
-  | "weeklyReview"
-  | "monthlyReview"
-  | "businessMetric"
-  | "distraction"
-  | "focusSession"
-  | "dailyLog"
-  | "project"
-  | "skill";
-
-type DbRow = Record<string, unknown>;
-
-type DbLike = Record<
-  ModelName,
-  {
-    deleteMany(): Promise<{ count: number }>;
-    upsert(args: {
-      where: { id: string };
-      create: DbRow & { id: string };
-      update: DbRow;
-    }): Promise<unknown>;
-  }
->;
-
-const DELETE_ORDER: ModelName[] = [
-  "evidence",
-  "skillEvidence",
-  "projectMilestone",
-  "weeklyReview",
-  "monthlyReview",
-  "businessMetric",
-  "distraction",
-  "focusSession",
-  "dailyLog",
-];
 
 type ImportBundle = {
   dailyLogs?: unknown[];
@@ -129,25 +104,31 @@ export async function importAll(raw: unknown): Promise<ActionResult> {
   if (!bundle || typeof bundle !== "object") {
     return { ok: false, error: "Invalid import file" };
   }
+  const user = await requireUser();
 
   await prisma.$transaction(async (tx) => {
     const db = tx as unknown as DbLike;
-    for (const model of DELETE_ORDER) {
-      await db[model].deleteMany();
+    for (const step of DELETE_ORDER) {
+      await db[step.model].deleteMany({ where: step.where(user.id) });
     }
 
     const upsertMany = async (model: string, rows: unknown[] | undefined) => {
       if (!Array.isArray(rows)) return;
+      const hasUserId = model !== "skillEvidence" && model !== "projectMilestone";
       for (const row of rows) {
         if (!row || typeof row !== "object") continue;
         const r = row as Record<string, unknown>;
         const { id, ...rest } = r;
         if (typeof id !== "string" || id === "") continue;
         try {
+          const data = {
+            ...rest,
+            ...(hasUserId ? { userId: user.id } : {}),
+          };
           await db[model as ModelName].upsert({
             where: { id },
-            create: { ...rest, id },
-            update: rest,
+            create: { ...data, id },
+            update: data,
           });
         } catch {
           // skip rows incompatible with current schema
@@ -172,133 +153,244 @@ export async function importAll(raw: unknown): Promise<ActionResult> {
   return { ok: true };
 }
 
-export async function seedData(): Promise<
-  ActionResult<{ dayKey: string; before: string }>
-> {
-  const today = new Date();
-  const dayKey = toDateKey(today);
-  const before = toDateKey(new Date(today.getTime() - 86_400_000));
+type ModelName =
+  | "evidence"
+  | "skillEvidence"
+  | "projectMilestone"
+  | "weeklyReview"
+  | "monthlyReview"
+  | "businessMetric"
+  | "distraction"
+  | "focusSession"
+  | "dailyLog"
+  | "project"
+  | "skill";
 
-  await prisma.$transaction(async (tx) => {
-    const project = await tx.project.create({
-      data: {
-        name: "Family Care OS",
-        description:
-          "Validate whether working adults struggle with fragmented aging-parent care coordination.",
-        status: "RESEARCH",
-        startDate: new Date(today.getTime() - 14_000_000 * 60),
-        primaryObjective:
-          "Validate whether working adults struggle with fragmented aging-parent care coordination.",
-        currentMilestone: "Customer interviews",
-        nextAction: "Book 2 more customer interviews",
-        users: 0,
-        revenue: 0,
-      },
+type DbRow = Record<string, unknown>;
+
+type DbDeleteWhere = {
+  userId?: string;
+  skill?: { userId: string };
+  project?: { userId: string };
+};
+
+type DbLike = Record<
+  ModelName,
+  {
+    deleteMany(args?: { where: DbDeleteWhere }): Promise<{ count: number }>;
+    upsert(args: {
+      where: { id: string };
+      create: DbRow & { id: string };
+      update: DbRow;
+    }): Promise<unknown>;
+  }
+>;
+
+type DeleteStep = {
+  model: ModelName;
+  where: (userId: string) => DbDeleteWhere;
+};
+
+const byUser = (userId: string): DbDeleteWhere => ({ userId });
+const bySkill = (userId: string): DbDeleteWhere => ({ skill: { userId } });
+const byProject = (userId: string): DbDeleteWhere => ({ project: { userId } });
+
+const DELETE_ORDER: DeleteStep[] = [
+  { model: "evidence", where: byUser },
+  { model: "skillEvidence", where: bySkill },
+  { model: "projectMilestone", where: byProject },
+  { model: "weeklyReview", where: byUser },
+  { model: "monthlyReview", where: byUser },
+  { model: "businessMetric", where: byUser },
+  { model: "distraction", where: byUser },
+  { model: "focusSession", where: byUser },
+  { model: "dailyLog", where: byUser },
+  { model: "project", where: byUser },
+  { model: "skill", where: byUser },
+];
+
+export async function seedData(): Promise<ActionResult<{ teamId: string }>> {
+  const user = await requireUser();
+
+  const tx = await prisma.$transaction(async (db) => {
+    let team = user.teamId
+      ? await prisma.team.findUnique({ where: { id: user.teamId } })
+      : null;
+
+    if (!team) {
+      team = await db.team.create({
+        data: { name: "My Team", eodMeetingTime: "17:30", eodMeetingDurationMinutes: 30 },
+      });
+      await db.user.update({ where: { id: user.id }, data: { teamId: team.id, isHead: true } });
+    }
+
+    const members = await db.user.findMany({ where: { teamId: team.id } });
+
+    const teammateSpecs = [
+      { name: "Priya", emoji: "👩🏽\u200d💻" },
+      { name: "Marcus", emoji: "🧑\u200d💻" },
+    ];
+    const teammatesNeeded = Math.max(0, 3 - members.length);
+    for (let i = 0; i < Math.min(teammatesNeeded, teammateSpecs.length); i++) {
+      await db.user.create({ data: { ...teammateSpecs[i], teamId: team.id } });
+    }
+
+    // Pull existing teammates too so the sample covers the whole team.
+    const teamUsers = await db.user.findMany({
+      where: { teamId: team.id },
+      orderBy: [{ isHead: "desc" }, { createdAt: "asc" }],
     });
 
-    await tx.projectMilestone.createMany({
-      data: [
-        {
-          projectId: project.id,
-          title: "Conduct 5 customer interviews",
-          description: "Talk to working adults coordinating care for aging parents.",
-          status: "COMPLETED",
-          completedDate: new Date(today.getTime() - 3_600_000 * 24 * 3),
-        },
-        {
-          projectId: project.id,
-          title: "Build initial care timeline prototype",
-          description: "Minimal prototype to test the coordination flow.",
-          status: "COMPLETED",
-          completedDate: new Date(today.getTime() - 3_600_000 * 24 * 2),
-        },
-        {
-          projectId: project.id,
-          title: "Book 10 interviews total",
-          status: "PLANNED",
-        },
-      ],
-    });
-
-    await tx.skill.createMany({
-      data: [
-        { name: "Python", level: 2 },
-        { name: "TypeScript", level: 1 },
-        { name: "React", level: 1 },
-        { name: "Backend", level: 1 },
-        { name: "Databases", level: 0 },
-        { name: "AI Engineering", level: 0 },
-        { name: "Cloud", level: 0 },
-        { name: "System Design", level: 0 },
-        { name: "Product", level: 1 },
-        { name: "Sales", level: 0 },
-        { name: "Marketing", level: 0 },
-        { name: "Communication", level: 1 },
-        { name: "Leadership", level: 0 },
-      ].map((s) => ({ ...s, description: null })),
-    });
-
-    await tx.dailyLog.createMany({
-      data: [
-        {
-          date: new Date(today.getTime() - 3_600_000 * 24),
-          primaryObjective: "Conduct 3 customer interviews",
-          deepWorkMinutes: 90,
-          technicalGrowth: 2,
-          outputScore: 8,
-          businessScore: 7,
-          disciplineScore: 8,
+    const today = fromDateKey(toDateKey(new Date()));
+    for (let i = 0; i < teamUsers.length; i++) {
+      const member = teamUsers[i];
+      await db.dailyLog.deleteMany({ where: { userId: member.id, date: today } });
+      await db.dailyLog.upsert({
+        where: { userId_date: { userId: member.id, date: today } },
+        create: {
+          userId: member.id,
+          date: today,
+          primaryObjective: member.isHead
+            ? "Coordinate the team's daily output."
+            : "Ship today's piece of the team goal.",
+          deepWorkMinutes: 45 + i * 15,
+          technicalGrowth: 3 + i,
+          outputScore: 7 + i,
+          businessScore: 5 + i,
+          disciplineScore: 6 + i,
           focusScore: 7,
-          whatWentWell: "Conducted 3 interviews; found a strong coordination pain point.",
-          whatWentWrong: "Underestimated time to transcribe calls.",
-          whatIAmAvoiding: "Writing the validation summary doc.",
-          highestLeverageNextAction: "Write the validation summary.",
+          whatWentWell: member.isHead
+            ? "Wrapped up the day's plan and recorded everyone's output."
+            : "Finished my milestone and left a clear note for tomorrow.",
         },
-        {
-          date: today,
-          primaryObjective: "Build document upload API for Care OS.",
-          deepWorkMinutes: 0,
-          technicalGrowth: null,
-          outputScore: null,
-          businessScore: null,
-          disciplineScore: null,
-          focusScore: null,
-          whatWentWell: "",
-          whatWentWrong: "",
-          whatIAmAvoiding: "",
-          highestLeverageNextAction: "",
-        },
-      ],
-    });
+        update: {},
+      });
 
-    await tx.businessMetric.createMany({
-      data: [
-        {
-          date: new Date(today.getTime() - 3_600_000 * 24),
-          peopleContacted: 15,
-          conversations: 5,
-          problemsDiscovered: 3,
-          demos: 1,
-          trials: 0,
-          payingCustomers: 0,
-          revenue: 0,
-          retention: 0,
-        },
-        {
+      await db.focusSession.deleteMany({ where: { userId: member.id, date: today } });
+      await db.focusSession.create({
+        data: {
+          userId: member.id,
           date: today,
-          peopleContacted: 0,
-          conversations: 0,
-          problemsDiscovered: 0,
+          durationMinutes: 45 + i * 15,
+          objective: member.isHead
+            ? "Team wrap-up and next-day coordination"
+            : "Deep work on today's milestone",
+          accomplishment: member.isHead
+            ? "Every member's output logged; tomorrow's plan set."
+            : "Completed the milestone step and landed the evidence.",
+          focusScore: 7,
+        },
+      });
+
+      await db.distraction.deleteMany({ where: { userId: member.id, date: today } });
+      await db.distraction.create({
+        data: {
+          userId: member.id,
+          date: today,
+          category: "SOCIAL_MEDIA",
+          minutes: 20 + i * 5,
+          note: "team channel noise",
+        },
+      });
+
+      await db.businessMetric.deleteMany({ where: { userId: member.id, date: today } });
+      await db.businessMetric.upsert({
+        where: { userId_date: { userId: member.id, date: today } },
+        create: {
+          userId: member.id,
+          date: today,
+          peopleContacted: 4 + i * 2,
+          conversations: 2,
+          problemsDiscovered: 1,
           demos: 0,
           trials: 0,
           payingCustomers: 0,
           revenue: 0,
           retention: 0,
         },
+        update: {},
+      });
+    }
+
+    // Head user gets a sample project + skills to populate the other tabs.
+    await db.project.deleteMany({ where: { userId: user.id } });
+    const project = await db.project.create({
+      data: {
+        userId: user.id,
+        name: "Family Care OS",
+        description: "Coordinate aging-parent care as a team.",
+        status: "BUILDING",
+        primaryObjective: "Run a 2-week build sprint as a tight team.",
+        currentMilestone: "Shared daily summary",
+        nextAction: "Review everyone's evidence in the wrap-up",
+        users: 0,
+        revenue: 0,
+      },
+    });
+    await db.projectMilestone.createMany({
+      data: [
+        {
+          projectId: project.id,
+          title: "Team profiles live",
+          status: "COMPLETED",
+          completedDate: today,
+        },
+        {
+          projectId: project.id,
+          title: "Daily summary reaches the team",
+          status: "IN_PROGRESS",
+        },
+        {
+          projectId: project.id,
+          title: "EOD conclusion meeting ritual",
+          status: "PLANNED",
+        },
       ],
     });
+
+    await db.skill.deleteMany({ where: { userId: user.id } });
+    await db.skill.createMany({
+      data: [
+        { userId: user.id, name: "Product", level: 1, description: null },
+        { userId: user.id, name: "Communication", level: 2, description: null },
+        { userId: user.id, name: "TypeScript", level: 1, description: null },
+      ],
+    });
+
+    return team;
   });
 
   revalidatePath("/", "layout");
-  return { ok: true, data: { dayKey, before } };
+  return { ok: true, data: { teamId: tx.id } };
+}
+
+const teamMeetingSchema = z.object({
+  name: z.string().trim().max(80).optional().or(z.literal("")),
+  eodMeetingTime: z
+    .string()
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Time must be HH:mm"),
+  eodMeetingDurationMinutes: z.number().int().min(5).max(180),
+});
+
+export async function updateTeamMeeting(raw: unknown): Promise<ActionResult> {
+  const parsed = safeParse(teamMeetingSchema, raw);
+  if (!parsed.ok) return parsed;
+  const user = await requireUser();
+  if (!user.isHead) return { ok: false, error: "Only the team head can change the meeting." };
+  if (!user.teamId) return { ok: false, error: "You are not in a team." };
+  const input = parsed.data;
+
+  await prisma.team.update({
+    where: { id: user.teamId },
+    data: {
+      ...(input.name !== undefined ? { name: input.name.trim() || "My Team" } : {}),
+      eodMeetingTime: input.eodMeetingTime,
+      eodMeetingDurationMinutes: input.eodMeetingDurationMinutes,
+    },
+  });
+
+  revalidatePath("/settings");
+  revalidatePath("/team");
+  revalidatePath("/", "layout");
+  return { ok: true };
 }

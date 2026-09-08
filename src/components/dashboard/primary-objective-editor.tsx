@@ -8,12 +8,14 @@ import { setPrimaryObjective } from "@/actions/daily";
 export function PrimaryObjectiveEditor({
   initial,
   dateKey,
+  readOnly = false,
 }: {
   initial: string;
   dateKey: string;
+  readOnly?: boolean;
 }) {
   const [value, setValue] = useState(initial);
-  const [editing, setEditing] = useState(!initial);
+  const [editing, setEditing] = useState(!initial && !readOnly);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
@@ -55,7 +57,8 @@ export function PrimaryObjectiveEditor({
           type="button"
           onClick={() => setEditing(true)}
           aria-label="Edit primary objective"
-          className="rounded p-1 text-faint opacity-0 transition-all group-hover:opacity-100 hover:bg-surface-2 hover:text-text"
+          disabled={readOnly}
+          className="rounded p-1 text-faint opacity-0 transition-all group-hover:opacity-100 hover:bg-surface-2 hover:text-text disabled:opacity-0"
         >
           <Pencil className="h-3.5 w-3.5" />
         </button>

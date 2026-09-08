@@ -32,12 +32,14 @@ function monthDays(ym: YearMonth): string[] {
 export function BusinessMetricForm({
   initial,
   initialMonth,
+  readOnly = false,
 }: {
   initial: {
     revenue: number;
     retention: number;
   };
   initialMonth: YearMonth;
+  readOnly?: boolean;
 }) {
   const router = useRouter();
   const [dateKey, setDateKey] = useState(toDateKey(new Date()));
@@ -98,7 +100,8 @@ export function BusinessMetricForm({
               setDateKey(e.target.value);
               setSaved(false);
             }}
-            className="h-9 flex-1 rounded-md border border-border bg-surface-2 px-3 font-mono text-sm tabular text-text focus:border-accent focus:outline-none"
+            disabled={readOnly}
+            className="h-9 flex-1 rounded-md border border-border bg-surface-2 px-3 font-mono text-sm tabular text-text focus:border-accent focus:outline-none disabled:opacity-60"
           >
             {days.map((d) => (
               <option key={d} value={d}>
@@ -109,7 +112,7 @@ export function BusinessMetricForm({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+      <fieldset disabled={readOnly} className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         {FIELDS.map((f) => (
           <div key={f.key}>
             <Label htmlFor={`biz-${f.key}`}>{f.label}</Label>
@@ -153,16 +156,18 @@ export function BusinessMetricForm({
             }}
           />
         </div>
-      </div>
+      </fieldset>
 
       {error ? <p className="mt-3 text-xs text-bad">{error}</p> : null}
       {saved ? <p className="mt-3 text-xs text-good">Saved.</p> : null}
-      <Button variant="primary" className="mt-4 w-full" onClick={submit} disabled={isPending}>
-        {isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
-        Save for {dateKey}
-      </Button>
+      {!readOnly ? (
+        <Button variant="primary" className="mt-4 w-full" onClick={submit} disabled={isPending}>
+          {isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
+          Save for {dateKey}
+        </Button>
+      ) : null}
       <p className="mt-2 text-center text-[11px] text-faint">
-        Daily values. This is a metrics tracker, not a CRM.
+        {readOnly ? "Read-only view. Changes save to your own profile." : "Daily values. This is a metrics tracker, not a CRM."}
       </p>
     </div>
   );

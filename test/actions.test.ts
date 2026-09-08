@@ -2,6 +2,37 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 
+type TestUser = {
+  id: string;
+  name: string;
+  emoji: string;
+  isHead: boolean;
+  teamId: string | null;
+  team: {
+    id: string;
+    name: string;
+    eodMeetingTime: string;
+    eodMeetingDurationMinutes: number;
+  } | null;
+  createdAt: Date;
+};
+
+const state = vi.hoisted(() => ({ user: null as TestUser | null }));
+
+vi.mock("@/lib/auth", () => ({
+  getCurrentUser: async () => state.user,
+  requireUser: async () => {
+    if (!state.user) throw new Error("test user not set");
+    return state.user as unknown;
+  },
+  resolveViewer: async (searchParams: { view?: string }, current: TestUser) => {
+    if (searchParams.view && searchParams.view !== current.id) {
+      return { user: { id: searchParams.view, name: "Other", emoji: "👤" }, isSelf: false };
+    }
+    return { user: { id: current.id, name: current.name, emoji: current.emoji }, isSelf: true };
+  },
+}));
+
 import { prisma } from "@/lib/prisma";
 import { toDateKey, fromDateKey, weekStart, weekEnd, monthKey } from "@/lib/date";
 import { aggregateWeek, aggregateMonth } from "@/lib/aggregations";
@@ -39,6 +70,7 @@ import {
   importAll,
   clearAll,
   seedData,
+  updateTeamMeeting,
 } from "@/actions/settings";
 import {
   getDashboardData,
@@ -49,7 +81,12 @@ import {
   getWeekReviewData,
   getProjectStats,
   getRecentWeekScoreHistory,
+  getMemberTodayDigest,
+  getTeamMembers,
+  getTeamDirectory,
 } from "@/lib/queries";
+
+const TEST_USER_ID = "test-founder";
 
 async function resetDb() {
   await prisma.$transaction([
@@ -64,10 +101,41 @@ async function resetDb() {
     prisma.dailyLog.deleteMany(),
     prisma.project.deleteMany(),
     prisma.skill.deleteMany(),
+    prisma.user.deleteMany(),
+    prisma.team.deleteMany(),
   ]);
 }
 
-beforeEach(resetDb);
+async function me() {
+  const user = await prisma.user.create({
+    data: { id: TEST_USER_ID, name: "Test Founder", emoji: "👤" },
+  });
+  state.user = {
+    id: user.id,
+    name: user.name,
+    emoji: user.emoji,
+    isHead: false,
+    teamId: null,
+    team: null,
+    createdAt: user.createdAt,
+  };
+  return state.user;
+}
+
+beforeEach(async () => {
+  await resetDb();
+  await me();
+  await prisma.team.create({
+    data: {
+      id: "team-1",
+      name: "Test Team",
+      eodMeetingTime: "17:30",
+      eodMeetingDurationMinutes: 30,
+    },
+  });
+});
+
+const uid = () => state.user!.id;
 
 describe("daily log + focus sessions (deep work sync)", () => {
   it("creates a daily log with scores and a default empty objective", async () => {
@@ -81,7 +149,7 @@ describe("daily log + focus sessions (deep work sync)", () => {
     expect(res.ok).toBe(true);
 
     const row = await prisma.dailyLog.findUnique({
-      where: { date: fromDateKey("2026-08-10") },
+      where: { userId_date: { userId: uid(), date: fromDateKey("2026-08-10") } },
     });
     expect(row?.deepWorkMinutes).toBe(60);
     expect(row?.technicalGrowth).toBe(8);
@@ -98,7 +166,7 @@ describe("daily log + focus sessions (deep work sync)", () => {
       focusScore: 7,
     });
     const row = await prisma.dailyLog.findUnique({
-      where: { date: fromDateKey("2026-08-10") },
+      where: { userId_date: { userId: uid(), date: fromDateKey("2026-08-10") } },
     });
     expect(row?.deepWorkMinutes).toBe(90);
 
@@ -108,7 +176,7 @@ describe("daily log + focus sessions (deep work sync)", () => {
       objective: "Ship the API",
     });
     const updated = await prisma.dailyLog.findUnique({
-      where: { date: fromDateKey("2026-08-10") },
+      where: { userId_date: { userId: uid(), date: fromDateKey("2026-08-10") } },
     });
     expect(updated?.deepWorkMinutes).toBe(135);
   });
@@ -121,10 +189,10 @@ describe("daily log + focus sessions (deep work sync)", () => {
       objective: "x",
     });
     const row = await prisma.dailyLog.findUnique({
-      where: { date: fromDateKey("2026-08-10") },
+      where: { userId_date: { userId: uid(), date: fromDateKey("2026-08-10") } },
     });
     expect(row?.deepWorkMinutes).toBe(240);
-    const dayStats = await getDashboardData(fromDateKey("2026-08-10"));
+    const dayStats = await getDashboardData(uid(), fromDateKey("2026-08-10"));
     expect(dayStats.deepWorkMinutes).toBe(90);
   });
 
@@ -133,7 +201,7 @@ describe("daily log + focus sessions (deep work sync)", () => {
     const res = await setPrimaryObjective({ objective: "Validate the pain" }, "2026-08-10");
     expect(res.ok).toBe(true);
     const row = await prisma.dailyLog.findUnique({
-      where: { date: fromDateKey("2026-08-10") },
+      where: { userId_date: { userId: uid(), date: fromDateKey("2026-08-10") } },
     });
     expect(row?.primaryObjective).toBe("Validate the pain");
     expect(row?.outputScore).toBe(6);
@@ -211,7 +279,7 @@ describe("the reviews chain (week -> monthly)", () => {
     });
     expect(save.ok).toBe(true);
 
-    const agg = await aggregateWeek(d1, weekEnd(d1));
+    const agg = await aggregateWeek(d1, weekEnd(d1), uid());
 
     expect(agg.deepWorkSessions).toBe(2);
     expect(agg.deepWorkMinutes).toBe(90);
@@ -223,7 +291,7 @@ describe("the reviews chain (week -> monthly)", () => {
     expect(agg.projectsShipped).toBe(1);
 
     const row = await prisma.weeklyReview.findUnique({
-      where: { weekStartDate: d1 },
+      where: { userId_weekStartDate: { userId: uid(), weekStartDate: d1 } },
     });
     expect(row).not.toBeNull();
     expect(row?.deepWorkSessions).toBe(agg.deepWorkSessions);
@@ -274,9 +342,12 @@ describe("the reviews chain (week -> monthly)", () => {
     const agg = await aggregateMonth(
       start,
       new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999),
+      uid(),
     );
 
-    const row = await prisma.monthlyReview.findUnique({ where: { month } });
+    const row = await prisma.monthlyReview.findUnique({
+      where: { userId_month: { userId: uid(), month } },
+    });
     expect(row).not.toBeNull();
     expect(row?.deepWorkMinutes).toBe(agg.deepWorkMinutes);
     expect(row?.outputScore).toBe(agg.outputScore);
@@ -304,7 +375,7 @@ describe("weekly aggregates count focus sessions only (lock-in of current intent
   it("ignores manual deep work minutes in aggregateWeek.deepWorkMinutes", async () => {
     await upsertDailyLog({ date: "2026-08-10", deepWorkMinutes: 200 });
     const start = fromDateKey("2026-08-10");
-    const agg = await aggregateWeek(start, weekEnd(start));
+    const agg = await aggregateWeek(start, weekEnd(start), uid());
     expect(agg.deepWorkMinutes).toBe(0); // no FocusSession rows
     expect(agg.deepWorkMinutes).not.toBe(200);
   });
@@ -327,6 +398,7 @@ describe("projects and milestones", () => {
     expect(row?.status).toBe("IDEA");
     expect(row?.users).toBe(5);
     expect(row?.revenue).toBe(10);
+    expect(row?.userId).toBe(uid());
 
     expect((await updateProjectStatus(pid, "LAUNCHED")).ok).toBe(true);
     expect(
@@ -348,6 +420,21 @@ describe("projects and milestones", () => {
     expect((await createProject({ name: "" })).ok).toBe(false);
     expect((await createProject({ name: "x", status: "IN_PROGRESS" })).ok).toBe(false);
     expect((await updateProjectStatus("nonexistent", "NOPE")).ok).toBe(false);
+  });
+
+  it("cannot mutate another user's project", async () => {
+    const other = await prisma.user.create({
+      data: { id: "other-user", name: "Other", emoji: "👤" },
+    });
+    const theirProject = await prisma.project.create({
+      data: { userId: other.id, name: "Not mine", status: "IDEA" },
+    });
+    expect((await updateProjectStatus(theirProject.id, "LAUNCHED")).ok).toBe(false);
+    expect((await updateProject(theirProject.id, { name: "Hacked" })).ok).toBe(false);
+    expect((await deleteProject(theirProject.id)).ok).toBe(false);
+    const untouched = await prisma.project.findUnique({ where: { id: theirProject.id } });
+    expect(untouched?.name).toBe("Not mine");
+    expect(untouched?.status).toBe("IDEA");
   });
 
   it("handles milestone lifecycle and completed dates", async () => {
@@ -423,6 +510,17 @@ describe("skills and evidence", () => {
     expect(await prisma.skillEvidence.count()).toBe(0);
   });
 
+  it("cannot touch another user's skill", async () => {
+    const other = await prisma.user.create({ data: { id: "other-user", name: "Other", emoji: "👤" } });
+    const theirSkill = await prisma.skill.create({
+      data: { userId: other.id, name: "Their skill", level: 1 },
+    });
+    expect((await updateSkill(theirSkill.id, { name: "Hacked", level: 6 })).ok).toBe(false);
+    expect((await setSkillLevel(theirSkill.id, 5)).ok).toBe(false);
+    expect((await deleteSkill(theirSkill.id)).ok).toBe(false);
+    expect((await addSkillEvidence(theirSkill.id, { title: "x", url: "https://x.com" })).ok).toBe(false);
+  });
+
   it("rejects skill level bounds and bad evidence URLs", async () => {
     expect((await createSkill({ name: "Python", level: 7 })).ok).toBe(false);
     const skill = await createSkill({ name: "Python", level: 1 });
@@ -442,11 +540,20 @@ describe("distractions", () => {
       note: "scrolling",
     });
     expect(res.ok).toBe(true);
-    expect((await getDistractionsForDay(fromDateKey("2026-08-10")))).toHaveLength(1);
+    expect((await getDistractionsForDay(uid(), fromDateKey("2026-08-10")))).toHaveLength(1);
 
     const row = await prisma.distraction.findFirst();
     expect((await deleteDistraction(row!.id)).ok).toBe(true);
     expect(await prisma.distraction.count()).toBe(0);
+  });
+
+  it("deleting another user's distraction is a no-op", async () => {
+    const other = await prisma.user.create({ data: { id: "other-user", name: "Other", emoji: "👤" } });
+    const d = await prisma.distraction.create({
+      data: { userId: other.id, date: fromDateKey("2026-08-10"), category: "YOUTUBE", minutes: 5 },
+    });
+    expect((await deleteDistraction(d.id)).ok).toBe(true);
+    expect(await prisma.distraction.count()).toBe(1);
   });
 
   it("rejects invalid categories and minute bounds", async () => {
@@ -475,7 +582,7 @@ describe("business metrics", () => {
       conversations: 6,
     });
     const row = await prisma.businessMetric.findUnique({
-      where: { date: fromDateKey("2026-08-10") },
+      where: { userId_date: { userId: uid(), date: fromDateKey("2026-08-10") } },
     });
     // a partial payload defaults the omitted fields, so revenue/retention reset to 0
     expect(row?.peopleContacted).toBe(20);
@@ -525,49 +632,151 @@ describe("dashboard queries", () => {
     });
     await addDistraction({ date: today, category: "OTHER", minutes: 10 });
 
-    const dash = await getDashboardData();
+    const dash = await getDashboardData(uid());
     expect(dash.dateKey).toBe(today);
     expect(dash.dailyLog?.primaryObjective).toBe("Write the summary");
     expect(dash.deepWorkMinutes).toBe(0); // no sessions
 
     await createFocusSession({ date: today, durationMinutes: 45, objective: "x" });
-    expect((await getDashboardData()).deepWorkMinutes).toBe(45);
+    expect((await getDashboardData(uid())).deepWorkMinutes).toBe(45);
 
-    const log = await getDailyLog(new Date());
+    const log = await getDailyLog(uid(), new Date());
     // manual 60 floors the stored day total even though the session sum is 45
     expect(log?.deepWorkMinutes).toBe(60);
 
-    const sessions = await getFocusSessionsForDay(new Date());
+    const sessions = await getFocusSessionsForDay(uid(), new Date());
     expect(sessions).toHaveLength(1);
 
-    const metrics = await getBusinessMetricsForDay(new Date());
+    const metrics = await getBusinessMetricsForDay(uid(), new Date());
     expect(metrics).toBeNull();
 
-    const week = await getWeekReviewData(new Date());
+    const week = await getWeekReviewData(uid(), new Date());
     expect(week.sessions).toHaveLength(1);
     expect(week.dailyLogs).toHaveLength(1);
     expect(week.distractions).toHaveLength(1);
 
-    const stats = await getProjectStats();
+    const stats = await getProjectStats(uid());
     expect(stats).toEqual([]);
 
-    const history = await getRecentWeekScoreHistory(new Date(), 2);
+    const history = await getRecentWeekScoreHistory(uid(), new Date(), 2);
     expect(Array.isArray(history)).toBe(true);
   });
 });
 
-describe("settings: seed / export / import / clear", () => {
-  it("seeds the sample data", async () => {
+describe("team layer", () => {
+  it("seeds a team, sample teammates, and today's digest for everyone", async () => {
     const res = await seedData();
     expect(res.ok).toBe(true);
-    const counts = await Promise.all([
-      prisma.project.count(),
-      prisma.projectMilestone.count(),
-      prisma.skill.count(),
-      prisma.dailyLog.count(),
-      prisma.businessMetric.count(),
+    if (!res.ok || !res.data) throw new Error("seed failed");
+    const teamId = res.data.teamId;
+
+    const members = await getTeamMembers(teamId);
+    expect(members).toHaveLength(3);
+    const heads = members.filter((m) => m.isHead);
+    expect(heads).toHaveLength(1);
+    expect(heads[0].id).toBe(TEST_USER_ID);
+
+    const digest = await getMemberTodayDigest(TEST_USER_ID);
+    expect(digest.deepWorkMinutes).toBeGreaterThan(0);
+    expect(digest.sessionCount).toBe(1);
+    expect(digest.outputs.length).toBeGreaterThan(0);
+    expect(digest.evidenceCount).toBe(0);
+  });
+
+  it("isolates same-date data between users", async () => {
+    const other = await prisma.user.create({ data: { id: "other-user", name: "Other", emoji: "👤" } });
+    await prisma.focusSession.create({
+      data: {
+        userId: other.id,
+        date: fromDateKey("2026-08-10"),
+        durationMinutes: 120,
+        objective: "theirs",
+      },
+    });
+    await createFocusSession({
+      date: "2026-08-10",
+      durationMinutes: 45,
+      objective: "mine",
+    });
+    const mine = await getDashboardData(uid(), fromDateKey("2026-08-10"));
+    expect(mine.sessions).toHaveLength(1);
+    expect(mine.sessions[0].objective).toBe("mine");
+    expect(mine.deepWorkMinutes).toBe(45);
+
+    const agg = await aggregateWeek(
+      fromDateKey("2026-08-10"),
+      weekEnd(fromDateKey("2026-08-10")),
+      uid(),
+    );
+    expect(agg.deepWorkSessions).toBe(1);
+    expect(agg.deepWorkMinutes).toBe(45);
+  });
+
+  it("getTeamDirectory returns members plus the meeting", async () => {
+    const me2 = state.user!;
+    me2.teamId = "team-1";
+    me2.team = { id: "team-1", name: "Test Team", eodMeetingTime: "17:30", eodMeetingDurationMinutes: 30 };
+    await prisma.user.update({ where: { id: uid() }, data: { teamId: "team-1" } });
+
+    const dir = await getTeamDirectory(me2);
+    expect(dir.meeting?.eodMeetingTime).toBe("17:30");
+    expect(dir.members.length).toBe(1);
+  });
+});
+
+describe("settings: team meeting", () => {
+  it("only the head can change the meeting", async () => {
+    const me2 = state.user!;
+    me2.teamId = "team-1";
+    me2.team = { id: "team-1", name: "Test Team", eodMeetingTime: "17:00", eodMeetingDurationMinutes: 30 };
+
+    // member (not head) -> rejected
+    const asMember = await updateTeamMeeting({
+      name: "Hacked Team",
+      eodMeetingTime: "08:00",
+      eodMeetingDurationMinutes: 15,
+    });
+    expect(asMember.ok).toBe(false);
+
+    me2.isHead = true;
+    const ok = await updateTeamMeeting({
+      name: "Founder Team",
+      eodMeetingTime: "18:15",
+      eodMeetingDurationMinutes: 45,
+    });
+    expect(ok.ok).toBe(true);
+
+    const team = await prisma.team.findUnique({ where: { id: "team-1" } });
+    expect(team?.name).toBe("Founder Team");
+    expect(team?.eodMeetingTime).toBe("18:15");
+    expect(team?.eodMeetingDurationMinutes).toBe(45);
+  });
+
+  it("rejects invalid meeting inputs", async () => {
+    state.user!.isHead = true;
+    expect((await updateTeamMeeting({ eodMeetingTime: "25:00", eodMeetingDurationMinutes: 30 })).ok).toBe(false);
+    expect((await updateTeamMeeting({ eodMeetingTime: "17:00", eodMeetingDurationMinutes: 1000 })).ok).toBe(false);
+  });
+});
+
+describe("settings: seed / export / import / clear", () => {
+  it("clears only the current user's data, not teammates'", async () => {
+    const res = await seedData();
+    if (!res.ok || !res.data) throw new Error("seed failed");
+    const teammates = (await prisma.user.findMany({ where: { teamId: res.data.teamId, id: { not: TEST_USER_ID } } })).length;
+    expect(teammates).toBe(2);
+
+    await clearAll();
+    const mine = await Promise.all([
+      prisma.project.count({ where: { userId: TEST_USER_ID } }),
+      prisma.skill.count({ where: { userId: TEST_USER_ID } }),
+      prisma.dailyLog.count({ where: { userId: TEST_USER_ID } }),
+      prisma.businessMetric.count({ where: { userId: TEST_USER_ID } }),
     ]);
-    expect(counts).toEqual([1, 3, 13, 2, 2]);
+    expect(mine).toEqual([0, 0, 0, 0]);
+
+    const teammatesRemain = await prisma.dailyLog.count({ where: { userId: { not: TEST_USER_ID } } });
+    expect(teammatesRemain).toBeGreaterThan(0);
   });
 
   it("round-trips a full export through clear and import", async () => {
@@ -576,26 +785,30 @@ describe("settings: seed / export / import / clear", () => {
     expect(exported.ok).toBe(true);
     if (!exported.ok || !exported.data) return;
     const bundle = exported.data;
-    expect(bundle.dailyLogs).toHaveLength(2);
+    // export only covers the signed-in user's rows
+    expect(bundle.dailyLogs).toHaveLength(1);
+    expect(bundle.projects).toHaveLength(1);
+    expect(bundle.milestones).toHaveLength(3);
+    expect(bundle.skills).toHaveLength(3);
 
     await clearAll();
     const cleared = await Promise.all([
-      prisma.dailyLog.count(),
-      prisma.project.count(),
-      prisma.skill.count(),
-      prisma.businessMetric.count(),
+      prisma.dailyLog.count({ where: { userId: TEST_USER_ID } }),
+      prisma.project.count({ where: { userId: TEST_USER_ID } }),
+      prisma.skill.count({ where: { userId: TEST_USER_ID } }),
+      prisma.businessMetric.count({ where: { userId: TEST_USER_ID } }),
     ]);
     expect(cleared).toEqual([0, 0, 0, 0]);
 
     await importAll(bundle);
     const restored = await Promise.all([
-      prisma.project.count(),
-      prisma.projectMilestone.count(),
-      prisma.skill.count(),
-      prisma.dailyLog.count(),
-      prisma.businessMetric.count(),
+      prisma.project.count({ where: { userId: TEST_USER_ID } }),
+      prisma.projectMilestone.count({ where: { project: { userId: TEST_USER_ID } } }),
+      prisma.skill.count({ where: { userId: TEST_USER_ID } }),
+      prisma.dailyLog.count({ where: { userId: TEST_USER_ID } }),
+      prisma.businessMetric.count({ where: { userId: TEST_USER_ID } }),
     ]);
-    expect(restored).toEqual([1, 3, 13, 2, 2]);
+    expect(restored).toEqual([1, 3, 3, 1, 1]);
   });
 
   it("rejects invalid import payloads and tolerates junk rows", async () => {
@@ -607,29 +820,8 @@ describe("settings: seed / export / import / clear", () => {
     expect(await prisma.dailyLog.count()).toBe(0);
   });
 
-  it("clears every table", async () => {
-    await seedData();
-    await createSkill({ name: "TestSkill", level: 1 });
-    await upsertDailyLog({ date: "2026-08-10", deepWorkMinutes: 10 });
-    await createProject({ name: "P" });
-    await addEvidence({ title: "E", url: "https://x.com" });
-    await saveWeeklyReview({ weekStartDate: "2026-08-31" });
-    await computeMonthlyReview("2026-08");
-
-    await clearAll();
-    const empty = await Promise.all([
-      prisma.dailyLog.count(),
-      prisma.focusSession.count(),
-      prisma.distraction.count(),
-      prisma.skill.count(),
-      prisma.skillEvidence.count(),
-      prisma.project.count(),
-      prisma.projectMilestone.count(),
-      prisma.businessMetric.count(),
-      prisma.weeklyReview.count(),
-      prisma.monthlyReview.count(),
-      prisma.evidence.count(),
-    ]);
-    expect(empty.every((n) => n === 0)).toBe(true);
+  it("clear works when everything is empty", async () => {
+    const r = await clearAll();
+    expect(r.ok).toBe(true);
   });
 });

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { fromDateKey, toDateKey } from "@/lib/date";
 import { dailyLogInputSchema, primaryObjectiveSchema } from "@/lib/validations";
+import { requireUser } from "@/lib/auth";
 import { safeParse, type ActionResult } from "./helpers";
 
 function parseNullableScores(input: {
@@ -25,6 +26,7 @@ function parseNullableScores(input: {
 export async function upsertDailyLog(raw: unknown): Promise<ActionResult> {
   const parsed = safeParse(dailyLogInputSchema, raw);
   if (!parsed.ok) return parsed;
+  const user = await requireUser();
 
   const input = parsed.data;
   const date = fromDateKey(input.date);
@@ -35,7 +37,7 @@ export async function upsertDailyLog(raw: unknown): Promise<ActionResult> {
     primaryObjective: (input.primaryObjective ?? "").trim(),
     deepWorkMinutes: Math.max(
       input.deepWorkMinutes,
-      await sumSessionMinutes(date),
+      await sumSessionMinutes(user.id, date),
     ),
     ...scores,
     whatWentWell: input.whatWentWell?.trim() || null,
@@ -46,8 +48,8 @@ export async function upsertDailyLog(raw: unknown): Promise<ActionResult> {
   };
 
   await prisma.dailyLog.upsert({
-    where: { date },
-    create: { date, ...data },
+    where: { userId_date: { userId: user.id, date } },
+    create: { userId: user.id, date, ...data },
     update: data,
   });
 
@@ -57,13 +59,13 @@ export async function upsertDailyLog(raw: unknown): Promise<ActionResult> {
   return { ok: true };
 }
 
-async function sumSessionMinutes(date: Date): Promise<number> {
+async function sumSessionMinutes(userId: string, date: Date): Promise<number> {
   const start = new Date(date);
   start.setHours(0, 0, 0, 0);
   const end = new Date(date);
   end.setHours(23, 59, 59, 999);
   const sessions = await prisma.focusSession.findMany({
-    where: { date: { gte: start, lte: end } },
+    where: { userId, date: { gte: start, lte: end } },
     select: { durationMinutes: true },
   });
   return sessions.reduce((acc, s) => acc + s.durationMinutes, 0);
@@ -76,6 +78,7 @@ export async function setPrimaryObjective(
   const parsed = safeParse(primaryObjectiveSchema, objectiveRaw);
   if (!parsed.ok) return parsed;
   const objective = parsed.data.objective.trim();
+  const user = await requireUser();
 
   const dateKey = typeof dateRaw === "string" ? dateRaw : toDateKey(new Date());
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
@@ -84,8 +87,8 @@ export async function setPrimaryObjective(
   const date = fromDateKey(dateKey);
 
   await prisma.dailyLog.upsert({
-    where: { date },
-    create: { date, primaryObjective: objective },
+    where: { userId_date: { userId: user.id, date } },
+    create: { userId: user.id, date, primaryObjective: objective },
     update: { primaryObjective: objective },
   });
 

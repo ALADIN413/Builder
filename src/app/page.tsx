@@ -7,6 +7,7 @@ import {
   ArrowRight,
 } from "lucide-react";
 import { getDashboardData } from "@/lib/queries";
+import { requireUser, resolveViewer } from "@/lib/auth";
 import { computeFounderScore } from "@/lib/scoring";
 import { DEEP_WORK_TARGET_MINUTES, DISTRACTION_LABELS } from "@/lib/constants";
 import { formatLong } from "@/lib/date";
@@ -18,8 +19,14 @@ import { FounderScoreCard } from "@/components/dashboard/founder-score-card";
 import { DistractionLogger } from "@/components/distractions/distraction-logger";
 import { EvidenceList } from "@/components/evidence/evidence-list";
 
-export default async function DashboardPage() {
-  const data = await getDashboardData();
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ view?: string }>;
+}) {
+  const current = await requireUser();
+  const { user, isSelf } = await resolveViewer(await searchParams, current);
+  const data = await getDashboardData(user.id);
   const { dailyLog, sessions, deepWorkMinutes, distractions, evidence, dateKey } =
     data;
 
@@ -43,13 +50,17 @@ export default async function DashboardPage() {
           <h1 className="text-lg font-semibold tracking-tight text-text">Today</h1>
           <p className="text-sm text-faint">{formatLong(today)}</p>
         </div>
-        <DistractionLogger dateKey={dateKey} />
+        <DistractionLogger dateKey={dateKey} readOnly={!isSelf} />
       </header>
 
       {/* Primary Objective */}
       <Panel className="border-accent/25">
         <PanelHeader title="Primary Objective" subtitle="One thing that moves everything else." />
-        <PrimaryObjectiveEditor initial={dailyLog?.primaryObjective ?? ""} dateKey={dateKey} />
+        <PrimaryObjectiveEditor
+          initial={dailyLog?.primaryObjective ?? ""}
+          dateKey={dateKey}
+          readOnly={!isSelf}
+        />
       </Panel>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -152,7 +163,7 @@ export default async function DashboardPage() {
             <PanelHeader
               title="Distractions"
               subtitle="The truth about lost time."
-              action={<DistractionLogger dateKey={dateKey} />}
+              action={<DistractionLogger dateKey={dateKey} readOnly={!isSelf} />}
             />
             {distractions.length > 0 ? (
               <div className="flex flex-col gap-1.5">

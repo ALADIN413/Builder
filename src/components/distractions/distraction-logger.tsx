@@ -14,11 +14,13 @@ import { Select } from "@/components/ui/select";
 export function DistractionLogger({
   dateKey,
   defaultOpen = false,
+  readOnly = false,
 }: {
   dateKey: string;
   defaultOpen?: boolean;
+  readOnly?: boolean;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
+  const [open, setOpen] = useState(defaultOpen && !readOnly);
   const [category, setCategory] = useState<DistractionCategory>("YOUTUBE");
   const [minutes, setMinutes] = useState("30");
   const [note, setNote] = useState("");
@@ -54,11 +56,14 @@ export function DistractionLogger({
 
   return (
     <>
-      <Button variant="ghost" size="sm" onClick={() => setOpen(true)}>
-        <Plus className="h-3.5 w-3.5" />
-        Log
-      </Button>
-      <Modal open={open} onClose={() => setOpen(false)} title="Log Distraction" size="sm">
+      {!readOnly ? (
+        <Button variant="ghost" size="sm" onClick={() => setOpen(true)}>
+          <Plus className="h-3.5 w-3.5" />
+          Log
+        </Button>
+      ) : null}
+      {open ? (
+        <Modal open={open} onClose={() => setOpen(false)} title="Log Distraction" size="sm">
         <div className="flex flex-col gap-4">
           <div>
             <Label htmlFor="dist-cat">Category</Label>
@@ -109,6 +114,7 @@ export function DistractionLogger({
           </div>
         </div>
       </Modal>
+      ) : null}
     </>
   );
 }

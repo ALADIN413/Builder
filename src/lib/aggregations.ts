@@ -20,30 +20,36 @@ const avg = (arr: number[]) =>
     ? Math.round((arr.reduce((a, b) => a + b, 0) / arr.length) * 10) / 10
     : 0;
 
-export async function aggregateWeek(start: Date, end: Date): Promise<WeekAggregate> {
-  const [sessions, businessRows, distractions, dailyLogs, projects] = await Promise.all([
-    prisma.focusSession.findMany({
-      where: { date: { gte: start, lte: end } },
-      select: { durationMinutes: true, focusScore: true },
-    }),
-    prisma.businessMetric.findMany({
-      where: { date: { gte: start, lte: end } },
-    }),
-    prisma.distraction.findMany({
-      where: { date: { gte: start, lte: end } },
-      select: { minutes: true },
-    }),
-    prisma.dailyLog.findMany({
-      where: { date: { gte: start, lte: end } },
-    }),
-    prisma.project.findMany({
-      where: {
-        updatedAt: { gte: start, lte: end },
-        status: { notIn: ["IDEA", "PAUSED", "KILLED"] },
-      },
-      select: { id: true, status: true },
-    }),
-  ]);
+export async function aggregateWeek(
+  start: Date,
+  end: Date,
+  userId: string,
+): Promise<WeekAggregate> {
+  const [sessions, businessRows, distractions, dailyLogs, projects] =
+    await Promise.all([
+      prisma.focusSession.findMany({
+        where: { userId, date: { gte: start, lte: end } },
+        select: { durationMinutes: true, focusScore: true },
+      }),
+      prisma.businessMetric.findMany({
+        where: { userId, date: { gte: start, lte: end } },
+      }),
+      prisma.distraction.findMany({
+        where: { userId, date: { gte: start, lte: end } },
+        select: { minutes: true },
+      }),
+      prisma.dailyLog.findMany({
+        where: { userId, date: { gte: start, lte: end } },
+      }),
+      prisma.project.findMany({
+        where: {
+          userId,
+          updatedAt: { gte: start, lte: end },
+          status: { notIn: ["IDEA", "PAUSED", "KILLED"] },
+        },
+        select: { id: true, status: true },
+      }),
+    ]);
 
   const totalMinutes = sessions.reduce((a, s) => a + s.durationMinutes, 0);
   const focusScores = sessions
@@ -88,20 +94,25 @@ export type MonthAggregate = {
   avgFounderScore: number;
 };
 
-export async function aggregateMonth(start: Date, end: Date): Promise<MonthAggregate> {
-  const [dailyLogs, sessions, businessRows, distractions, projects] = await Promise.all([
-    prisma.dailyLog.findMany({ where: { date: { gte: start, lte: end } } }),
-    prisma.focusSession.findMany({
-      where: { date: { gte: start, lte: end } },
-      select: { durationMinutes: true },
-    }),
-    prisma.businessMetric.findMany({ where: { date: { gte: start, lte: end } } }),
-    prisma.distraction.findMany({
-      where: { date: { gte: start, lte: end } },
-      select: { minutes: true },
-    }),
-    prisma.project.findMany(),
-  ]);
+export async function aggregateMonth(
+  start: Date,
+  end: Date,
+  userId: string,
+): Promise<MonthAggregate> {
+  const [dailyLogs, sessions, businessRows, distractions, projects] =
+    await Promise.all([
+      prisma.dailyLog.findMany({ where: { userId, date: { gte: start, lte: end } } }),
+      prisma.focusSession.findMany({
+        where: { userId, date: { gte: start, lte: end } },
+        select: { durationMinutes: true },
+      }),
+      prisma.businessMetric.findMany({ where: { userId, date: { gte: start, lte: end } } }),
+      prisma.distraction.findMany({
+        where: { userId, date: { gte: start, lte: end } },
+        select: { minutes: true },
+      }),
+      prisma.project.findMany({ where: { userId } }),
+    ]);
 
   const founderScores = dailyLogs.map((d) =>
     computeFounderScore({
@@ -115,7 +126,9 @@ export async function aggregateMonth(start: Date, end: Date): Promise<MonthAggre
 
   return {
     deepWorkMinutes: sessions.reduce((a, s) => a + s.durationMinutes, 0),
-    outputScore: avg(dailyLogs.map((d) => d.outputScore).filter((v): v is number => v != null)),
+    outputScore: avg(
+      dailyLogs.map((d) => d.outputScore).filter((v): v is number => v != null),
+    ),
     technicalCapability: avg(
       dailyLogs.map((d) => d.technicalGrowth).filter((v): v is number => v != null),
     ),

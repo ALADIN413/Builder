@@ -2,8 +2,27 @@
 
 import { useState } from "react";
 import { Header, MobileMenu, SidebarNav } from "./sidebar";
+import { MemberSwitcher, type SwitcherMember } from "@/components/team/member-switcher";
+import { EodMeetingBanner } from "@/components/team/eod-meeting-banner";
+import { ViewingNotice } from "@/components/team/viewing-notice";
 
-export function AppShellContent({ children }: { children: React.ReactNode }) {
+export type ShellSession = {
+  user: { id: string; name: string; emoji: string; isHead: boolean };
+  members: SwitcherMember[];
+  meeting: {
+    name: string;
+    eodMeetingTime: string;
+    eodMeetingDurationMinutes: number;
+  } | null;
+};
+
+export function AppShellContent({
+  session,
+  children,
+}: {
+  session: ShellSession;
+  children: React.ReactNode;
+}) {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   return (
@@ -19,7 +38,19 @@ export function AppShellContent({ children }: { children: React.ReactNode }) {
         </div>
       </div>
       <div className="flex min-w-0 flex-1 flex-col">
-        <Header onMenu={() => setMobileOpen(true)} />
+        <Header
+          onMenu={() => setMobileOpen(true)}
+          switcher={
+            <MemberSwitcher members={session.members} currentUserId={session.user.id} />
+          }
+        />
+        <ViewingNotice members={session.members} currentUserId={session.user.id} />
+        {session.meeting && session.members.length > 1 ? (
+          <EodMeetingBanner
+            time={session.meeting.eodMeetingTime}
+            durationMinutes={session.meeting.eodMeetingDurationMinutes}
+          />
+        ) : null}
         <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 md:px-6 md:py-8">
           {children}
         </main>

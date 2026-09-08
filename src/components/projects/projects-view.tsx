@@ -74,7 +74,13 @@ const M_TONE: Record<MilestoneStatus, "neutral" | "info" | "accent" | "good" | "
   BLOCKED: "bad",
 };
 
-export function ProjectsView({ projects }: { projects: ProjectDTO[] }) {
+export function ProjectsView({
+  projects,
+  readOnly = false,
+}: {
+  projects: ProjectDTO[];
+  readOnly?: boolean;
+}) {
   const router = useRouter();
   const [expanded, setExpanded] = useState<string | null>(null);
   const [formOpen, setFormOpen] = useState(false);
@@ -134,10 +140,12 @@ export function ProjectsView({ projects }: { projects: ProjectDTO[] }) {
         <p className="text-sm text-faint">
           {projects.length} {projects.length === 1 ? "project" : "projects"}
         </p>
-        <Button variant="primary" size="sm" onClick={openCreate}>
-          <Plus className="h-3.5 w-3.5" />
-          New Project
-        </Button>
+        {!readOnly ? (
+          <Button variant="primary" size="sm" onClick={openCreate}>
+            <Plus className="h-3.5 w-3.5" />
+            New Project
+          </Button>
+        ) : null}
       </div>
 
       {projects.length === 0 ? (
@@ -146,9 +154,11 @@ export function ProjectsView({ projects }: { projects: ProjectDTO[] }) {
           title="Nothing here yet."
           hint="Create the thing you're actually trying to build."
           action={
-            <Button variant="primary" size="sm" onClick={openCreate}>
-              Create your first project
-            </Button>
+            readOnly ? undefined : (
+              <Button variant="primary" size="sm" onClick={openCreate}>
+                Create your first project
+              </Button>
+            )
           }
         />
       ) : (
@@ -216,6 +226,7 @@ export function ProjectsView({ projects }: { projects: ProjectDTO[] }) {
                             <Select
                               value={p.status}
                               onChange={(e) => changeStatus(p.id, e.target.value as ProjectStatus)}
+                              disabled={readOnly}
                               className="h-8 w-auto text-xs"
                             >
                               {PROJECT_STATUSES.map((s) => (
@@ -240,10 +251,12 @@ export function ProjectsView({ projects }: { projects: ProjectDTO[] }) {
                             <p className="text-[11px] uppercase tracking-wider text-faint">
                               Milestones
                             </p>
-                            <Button variant="ghost" size="sm" onClick={() => openNewMilestone(p.id)}>
-                              <Plus className="h-3 w-3" />
-                              Add
-                            </Button>
+                            {!readOnly ? (
+                              <Button variant="ghost" size="sm" onClick={() => openNewMilestone(p.id)}>
+                                <Plus className="h-3 w-3" />
+                                Add
+                              </Button>
+                            ) : null}
                           </div>
                           {p.milestones.length === 0 ? (
                             <p className="rounded-md border border-dashed border-border px-3 py-3 text-xs text-faint">
@@ -280,24 +293,28 @@ export function ProjectsView({ projects }: { projects: ProjectDTO[] }) {
                                   <Badge tone={M_TONE[m.status]}>
                                     {MILESTONE_STATUS_LABELS[m.status]}
                                   </Badge>
-                                  <button
-                                    type="button"
-                                    onClick={() => openEditMilestone(p, m)}
-                                    aria-label="Edit milestone"
-                                    className="rounded p-1 text-faint transition-colors hover:bg-surface-3 hover:text-text"
-                                  >
-                                    <Pencil className="h-3 w-3" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      setConfirm({ kind: "milestone", id: m.id, title: m.title })
-                                    }
-                                    aria-label="Delete milestone"
-                                    className="rounded p-1 text-faint transition-colors hover:bg-bad/20 hover:text-bad"
-                                  >
-                                    <Trash2 className="h-3 w-3" />
-                                  </button>
+                                  {!readOnly ? (
+                                    <>
+                                      <button
+                                        type="button"
+                                        onClick={() => openEditMilestone(p, m)}
+                                        aria-label="Edit milestone"
+                                        className="rounded p-1 text-faint transition-colors hover:bg-surface-3 hover:text-text"
+                                      >
+                                        <Pencil className="h-3 w-3" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setConfirm({ kind: "milestone", id: m.id, title: m.title })
+                                        }
+                                        aria-label="Delete milestone"
+                                        className="rounded p-1 text-faint transition-colors hover:bg-bad/20 hover:text-bad"
+                                      >
+                                        <Trash2 className="h-3 w-3" />
+                                      </button>
+                                    </>
+                                  ) : null}
                                 </li>
                               ))}
                             </ul>
@@ -306,22 +323,24 @@ export function ProjectsView({ projects }: { projects: ProjectDTO[] }) {
                       </div>
 
                       <div className="flex flex-col gap-4">
-                        <div className="flex gap-2">
-                          <Button variant="secondary" size="sm" onClick={() => openEdit(p)}>
-                            <Pencil className="h-3 w-3" />
-                            Edit
-                          </Button>
-                          <Button
-                            variant="danger"
-                            size="sm"
-                            onClick={() =>
-                              setConfirm({ kind: "project", id: p.id, title: p.name })
-                            }
-                          >
-                            <Trash2 className="h-3 w-3" />
-                            Delete
-                          </Button>
-                        </div>
+                        {!readOnly ? (
+                          <div className="flex gap-2">
+                            <Button variant="secondary" size="sm" onClick={() => openEdit(p)}>
+                              <Pencil className="h-3 w-3" />
+                              Edit
+                            </Button>
+                            <Button
+                              variant="danger"
+                              size="sm"
+                              onClick={() =>
+                                setConfirm({ kind: "project", id: p.id, title: p.name })
+                              }
+                            >
+                              <Trash2 className="h-3 w-3" />
+                              Delete
+                            </Button>
+                          </div>
+                        ) : null}
                         {p.currentMilestone ? (
                           <div className="rounded-md border border-accent/25 bg-accent/5 px-3 py-2.5">
                             <p className="text-[11px] uppercase tracking-wider text-accent">

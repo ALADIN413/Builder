@@ -14,6 +14,7 @@ export function DailyLogForm({
   dateKey,
   initial,
   sessionMinutes,
+  readOnly = false,
 }: {
   dateKey: string;
   initial: {
@@ -29,6 +30,7 @@ export function DailyLogForm({
     focusScore: number | null;
   };
   sessionMinutes: number;
+  readOnly?: boolean;
 }) {
   const router = useRouter();
   const [form, setForm] = useState(initial);
@@ -179,17 +181,23 @@ export function DailyLogForm({
           {saved ? (
             <p className="mt-3 text-xs text-good">Saved. That&apos;s the record.</p>
           ) : null}
-          <Button
-            variant="primary"
-            className="mt-4 w-full"
-            onClick={submit}
-            disabled={isPending}
-          >
-            {isPending ? (
-              <LoaderCircle className="h-4 w-4 animate-spin" />
-            ) : null}
-            Save Daily Log
-          </Button>
+          {!readOnly ? (
+            <Button
+              variant="primary"
+              className="mt-4 w-full"
+              onClick={submit}
+              disabled={isPending}
+            >
+              {isPending ? (
+                <LoaderCircle className="h-4 w-4 animate-spin" />
+              ) : null}
+              Save Daily Log
+            </Button>
+          ) : (
+            <p className="mt-4 text-xs text-faint">
+              Read-only view — changes save to your own profile.
+            </p>
+          )}
         </div>
       </div>
     </div>

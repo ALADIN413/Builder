@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
 }
 
 enum ProjectStatus {
@@ -45,26 +45,67 @@ enum DistractionCategory {
   OTHER
 }
 
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  emoji     String   @default("👤")
+  isHead    Boolean  @default(false)
+  teamId    String?
+  team      Team?    @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  dailyLogs        DailyLog[]
+  focusSessions    FocusSession[]
+  distractions     Distraction[]
+  skills           Skill[]
+  projects         Project[]
+  businessMetrics  BusinessMetric[]
+  weeklyReviews    WeeklyReview[]
+  monthlyReviews   MonthlyReview[]
+  evidence         Evidence[]
+
+  @@index([teamId])
+}
+
+model Team {
+  id                        String   @id @default(cuid())
+  name                      String   @default("My Team")
+  eodMeetingTime            String   @default("17:00")
+  eodMeetingDurationMinutes Int      @default(30)
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+
+  members User[]
+}
+
 model DailyLog {
-  id                       String   @id @default(cuid())
-  date                     DateTime @unique
-  primaryObjective         String   @default("")
-  deepWorkMinutes          Int      @default(0)
-  technicalGrowth          Int?
-  outputScore              Int?
-  businessScore            Int?
-  disciplineScore          Int?
-  focusScore               Int?
-  whatWentWell             String?
-  whatWentWrong            String?
-  whatIAmAvoiding          String?
+  id                        String   @id @default(cuid())
+  userId                    String
+  user                      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date                      DateTime
+  primaryObjective          String   @default("")
+  deepWorkMinutes           Int      @default(0)
+  technicalGrowth           Int?
+  outputScore               Int?
+  businessScore             Int?
+  disciplineScore           Int?
+  focusScore                Int?
+  whatWentWell              String?
+  whatWentWrong             String?
+  whatIAmAvoiding           String?
   highestLeverageNextAction String?
-  createdAt                DateTime @default(now())
-  updatedAt                DateTime @updatedAt
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+
+  @@unique([userId, date])
+  @@index([date])
 }
 
 model FocusSession {
   id              String       @id @default(cuid())
+  userId          String
+  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   date            DateTime
   startTime       DateTime?
   endTime         DateTime?
@@ -78,25 +119,35 @@ model FocusSession {
   evidenceType    EvidenceType?
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
+
+  @@index([userId, date])
 }
 
 model Distraction {
   id        String              @id @default(cuid())
+  userId    String
+  user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   date      DateTime
   category  DistractionCategory
   minutes   Int
   note      String?
   createdAt DateTime            @default(now())
+
+  @@index([userId, date])
 }
 
 model Skill {
   id          String          @id @default(cuid())
-  name        String          @unique
+  userId      String
+  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
   description String?
   level       Int             @default(0)
   createdAt   DateTime        @default(now())
   updatedAt   DateTime        @updatedAt
   evidence    SkillEvidence[]
+
+  @@unique([userId, name])
 }
 
 model SkillEvidence {
@@ -112,6 +163,8 @@ model SkillEvidence {
 
 model Project {
   id               String            @id @default(cuid())
+  userId           String
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   name             String
   description      String?
   status           ProjectStatus     @default(IDEA)
@@ -125,6 +178,8 @@ model Project {
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
   milestones       ProjectMilestone[]
+
+  @@index([userId])
 }
 
 model ProjectMilestone {
@@ -143,7 +198,9 @@ model ProjectMilestone {
 
 model BusinessMetric {
   id                 String   @id @default(cuid())
-  date               DateTime @unique
+  userId             String
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date               DateTime
   peopleContacted    Int      @default(0)
   conversations      Int      @default(0)
   problemsDiscovered Int      @default(0)
@@ -154,11 +211,15 @@ model BusinessMetric {
   retention          Float    @default(0)
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
+
+  @@unique([userId, date])
 }
 
 model WeeklyReview {
   id                    String   @id @default(cuid())
-  weekStartDate         DateTime @unique
+  userId                String
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  weekStartDate         DateTime
   deepWorkSessions      Int      @default(0)
   deepWorkMinutes       Int      @default(0)
   avgFocus              Float    @default(0)
@@ -180,11 +241,15 @@ model WeeklyReview {
   nextObjective         String?
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
+
+  @@unique([userId, weekStartDate])
 }
 
 model MonthlyReview {
   id                    String   @id @default(cuid())
-  month                 String   @unique
+  userId                String
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  month                 String
   deepWorkMinutes       Int      @default(0)
   outputScore           Float    @default(0)
   technicalCapability   Float    @default(0)
@@ -197,10 +262,14 @@ model MonthlyReview {
   avgFounderScore       Float    @default(0)
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
+
+  @@unique([userId, month])
 }
 
 model Evidence {
   id          String       @id @default(cuid())
+  userId      String
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   title       String
   type        EvidenceType
   url         String
@@ -208,4 +277,6 @@ model Evidence {
   relatedType String?
   relatedId   String?
   createdAt   DateTime     @default(now())
+
+  @@index([userId])
 }

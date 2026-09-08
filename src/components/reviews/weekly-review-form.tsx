@@ -55,10 +55,12 @@ export function WeeklyReviewForm({
   weekKey,
   agg,
   initial,
+  readOnly = false,
 }: {
   weekKey: string;
   agg: unknown;
   initial: Record<string, string>;
+  readOnly?: boolean;
 }) {
   const router = useRouter();
   const [answers, setAnswers] = useState<Record<string, string>>(initial);
@@ -82,7 +84,7 @@ export function WeeklyReviewForm({
   return (
     <div className="flex flex-col gap-6">
       <MetricsPanel agg={agg as WeekAggregate} />
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+      <fieldset disabled={readOnly} className="grid grid-cols-1 gap-4 md:grid-cols-2">
         {QUESTIONS.map((q) => (
           <div key={q.key}>
             <Label htmlFor={`q-${q.key}`}>{q.label}</Label>
@@ -98,15 +100,17 @@ export function WeeklyReviewForm({
             />
           </div>
         ))}
-      </div>
+      </fieldset>
       {error ? <p className="text-xs text-bad">{error}</p> : null}
       {saved ? <p className="text-xs text-good">Review saved.</p> : null}
-      <div>
-        <Button variant="primary" onClick={submit} disabled={isPending}>
-          {isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
-          Save Weekly Review
-        </Button>
-      </div>
+      {!readOnly ? (
+        <div>
+          <Button variant="primary" onClick={submit} disabled={isPending}>
+            {isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
+            Save Weekly Review
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 }

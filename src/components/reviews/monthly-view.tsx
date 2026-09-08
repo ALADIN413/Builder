@@ -27,6 +27,7 @@ export function MonthlyView({
   month,
   agg,
   history,
+  readOnly = false,
 }: {
   month: string;
   agg: MonthAggregate | null;
@@ -37,6 +38,7 @@ export function MonthlyView({
     revenue: number;
     customers: number;
   }[];
+  readOnly?: boolean;
 }) {
   const router = useRouter();
   const [refreshing, setRefreshing] = useState(false);
@@ -62,14 +64,16 @@ export function MonthlyView({
         <p className="text-sm text-faint">
           Aggregated from daily logs, sessions, business metrics, and distractions.
         </p>
-        <Button variant="secondary" size="sm" onClick={recompute} disabled={refreshing}>
-          {refreshing ? (
-            <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <RefreshCw className="h-3.5 w-3.5" />
-          )}
-          Recompute
-        </Button>
+        {!readOnly ? (
+          <Button variant="secondary" size="sm" onClick={recompute} disabled={refreshing}>
+            {refreshing ? (
+              <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="h-3.5 w-3.5" />
+            )}
+            Recompute
+          </Button>
+        ) : null}
       </div>
       {error ? <p className="text-xs text-bad">{error}</p> : null}
 

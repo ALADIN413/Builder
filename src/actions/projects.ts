@@ -7,15 +7,18 @@ import {
   projectInputSchema,
   projectStatusSchema,
 } from "@/lib/validations";
+import { requireUser } from "@/lib/auth";
 import { dateFromForm, safeParse, type ActionResult } from "./helpers";
 
 export async function createProject(raw: unknown): Promise<ActionResult<{ id: string }>> {
   const parsed = safeParse(projectInputSchema, raw);
   if (!parsed.ok) return parsed;
+  const user = await requireUser();
   const input = parsed.data;
 
   const project = await prisma.project.create({
     data: {
+      userId: user.id,
       name: input.name.trim(),
       description: input.description?.trim() || null,
       status: input.status,
@@ -36,6 +39,8 @@ export async function createProject(raw: unknown): Promise<ActionResult<{ id: st
 export async function updateProject(id: string, raw: unknown): Promise<ActionResult> {
   const parsed = safeParse(projectInputSchema, raw);
   if (!parsed.ok) return parsed;
+  const user = await requireUser();
+  if (!(await ownsProject(user.id, id))) return { ok: false, error: "Project not found" };
   const input = parsed.data;
 
   await prisma.project.update({
@@ -61,12 +66,16 @@ export async function updateProject(id: string, raw: unknown): Promise<ActionRes
 export async function updateProjectStatus(id: string, statusRaw: unknown): Promise<ActionResult> {
   const parsed = safeParse(projectStatusSchema, { status: statusRaw });
   if (!parsed.ok) return parsed;
+  const user = await requireUser();
+  if (!(await ownsProject(user.id, id))) return { ok: false, error: "Project not found" };
   await prisma.project.update({ where: { id }, data: { status: parsed.data.status } });
   revalidatePath("/projects");
   return { ok: true };
 }
 
 export async function deleteProject(id: string): Promise<ActionResult> {
+  const user = await requireUser();
+  if (!(await ownsProject(user.id, id))) return { ok: false, error: "Project not found" };
   await prisma.project.delete({ where: { id } });
   revalidatePath("/projects");
   revalidatePath("/reviews");
@@ -76,6 +85,8 @@ export async function deleteProject(id: string): Promise<ActionResult> {
 export async function createMilestone(projectId: string, raw: unknown): Promise<ActionResult> {
   const parsed = safeParse(milestoneInputSchema, raw);
   if (!parsed.ok) return parsed;
+  const user = await requireUser();
+  if (!(await ownsProject(user.id, projectId))) return { ok: false, error: "Project not found" };
   const input = parsed.data;
 
   await prisma.projectMilestone.create({
@@ -97,6 +108,8 @@ export async function createMilestone(projectId: string, raw: unknown): Promise<
 export async function updateMilestone(id: string, raw: unknown): Promise<ActionResult> {
   const parsed = safeParse(milestoneInputSchema, raw);
   if (!parsed.ok) return parsed;
+  const user = await requireUser();
+  if (!(await ownsMilestone(user.id, id))) return { ok: false, error: "Milestone not found" };
   const input = parsed.data;
 
   const completedDate =
@@ -121,7 +134,25 @@ export async function updateMilestone(id: string, raw: unknown): Promise<ActionR
 }
 
 export async function deleteMilestone(id: string): Promise<ActionResult> {
+  const user = await requireUser();
+  if (!(await ownsMilestone(user.id, id))) return { ok: false, error: "Milestone not found" };
   await prisma.projectMilestone.delete({ where: { id } });
   revalidatePath("/projects");
   return { ok: true };
+}
+
+async function ownsProject(userId: string, projectId: string): Promise<boolean> {
+  const project = await prisma.project.findFirst({
+    where: { id: projectId, userId },
+    select: { id: true },
+  });
+  return project !== null;
+}
+
+async function ownsMilestone(userId: string, milestoneId: string): Promise<boolean> {
+  const milestone = await prisma.projectMilestone.findFirst({
+    where: { id: milestoneId, project: { userId } },
+    select: { id: true },
+  });
+  return milestone !== null;
 }

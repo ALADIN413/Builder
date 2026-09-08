@@ -6,6 +6,7 @@ import {
   Boxes,
   TrendingUp,
   LineChart,
+  Users,
   Settings,
   type LucideIcon,
 } from "lucide-react";
@@ -19,6 +20,7 @@ export type NavItem = {
 
 export const NAV_ITEMS: NavItem[] = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard, exact: true },
+  { href: "/team", label: "Team", icon: Users, exact: true },
   { href: "/focus", label: "Focus", icon: Timer },
   { href: "/daily", label: "Daily", icon: CalendarDays },
   { href: "/projects", label: "Projects", icon: FolderKanban },

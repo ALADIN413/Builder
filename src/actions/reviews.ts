@@ -4,17 +4,19 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { fromDateKey, weekEnd } from "@/lib/date";
 import { weeklyReviewInputSchema } from "@/lib/validations";
+import { requireUser } from "@/lib/auth";
 import { safeParse, type ActionResult } from "./helpers";
 import { aggregateMonth, aggregateWeek } from "@/lib/aggregations";
 
 export async function saveWeeklyReview(raw: unknown): Promise<ActionResult> {
   const parsed = safeParse(weeklyReviewInputSchema, raw);
   if (!parsed.ok) return parsed;
+  const user = await requireUser();
   const input = parsed.data;
 
   const start = fromDateKey(input.weekStartDate);
   const end = weekEnd(start);
-  const agg = await aggregateWeek(start, end);
+  const agg = await aggregateWeek(start, end, user.id);
 
   const data = {
     weekStartDate: start,
@@ -40,8 +42,8 @@ export async function saveWeeklyReview(raw: unknown): Promise<ActionResult> {
   };
 
   await prisma.weeklyReview.upsert({
-    where: { weekStartDate: start },
-    create: data,
+    where: { userId_weekStartDate: { userId: user.id, weekStartDate: start } },
+    create: { userId: user.id, ...data },
     update: data,
   });
 
@@ -60,14 +62,16 @@ export async function computeMonthlyReview(
   if (Number.isNaN(y) || Number.isNaN(m) || m < 1 || m > 12) {
     return { ok: false, error: "Invalid month" };
   }
+  const user = await requireUser();
   const start = new Date(y, m - 1, 1, 0, 0, 0, 0);
   const end = new Date(y, m, 0, 23, 59, 59, 999);
 
-  const agg = await aggregateMonth(start, end);
+  const agg = await aggregateMonth(start, end, user.id);
 
   await prisma.monthlyReview.upsert({
-    where: { month },
+    where: { userId_month: { userId: user.id, month } },
     create: {
+      userId: user.id,
       month,
       deepWorkMinutes: agg.deepWorkMinutes,
       outputScore: agg.outputScore,

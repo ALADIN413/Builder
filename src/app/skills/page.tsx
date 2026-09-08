@@ -1,11 +1,20 @@
 import type { Metadata } from "next";
 import { prisma } from "@/lib/prisma";
+import { requireUser, resolveViewer } from "@/lib/auth";
 import { SkillsView } from "@/components/skills/skills-view";
 
 export const metadata: Metadata = { title: "Skills" };
 
-export default async function SkillsPage() {
+export default async function SkillsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ view?: string }>;
+}) {
+  const current = await requireUser();
+  const { user, isSelf } = await resolveViewer(await searchParams, current);
+
   const skills = await prisma.skill.findMany({
+    where: { userId: user.id },
     include: { evidence: { orderBy: { createdAt: "desc" } } },
     orderBy: { name: "asc" },
   });
@@ -32,7 +41,7 @@ export default async function SkillsPage() {
           Demonstrated ability — not time spent studying. Back each level with evidence.
         </p>
       </header>
-      <SkillsView skills={dto} />
+      <SkillsView skills={dto} readOnly={!isSelf} />
     </div>
   );
 }

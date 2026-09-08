@@ -44,7 +44,13 @@ export function SidebarNav({ onClose }: { onClose: () => void }) {
   );
 }
 
-export function Header({ onMenu }: { onMenu: () => void }) {
+export function Header({
+  onMenu,
+  switcher,
+}: {
+  onMenu: () => void;
+  switcher?: React.ReactNode;
+}) {
   return (
     <header className="flex h-14 items-center gap-3 border-b border-line px-4 md:px-6">
       <button
@@ -61,7 +67,8 @@ export function Header({ onMenu }: { onMenu: () => void }) {
           Founder OS
         </span>
       </div>
-      <div className="ml-auto">
+      <div className="ml-auto flex items-center gap-2">
+        {switcher}
         <LiveDate />
       </div>
     </header>

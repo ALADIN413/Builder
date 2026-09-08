@@ -43,7 +43,7 @@ export type SkillDTO = {
 
 const LEVEL_COLORS = ["#5b6a7a", "#93a0af", "#4a9eda", "#43a6c4", "#3aa878", "#e8a33d", "#f4b756"];
 
-export function SkillsView({ skills }: { skills: SkillDTO[] }) {
+export function SkillsView({ skills, readOnly = false }: { skills: SkillDTO[]; readOnly?: boolean }) {
   const router = useRouter();
   const [createOpen, setCreateOpen] = useState(false);
   const [editSkill, setEditSkill] = useState<SkillDTO | null>(null);
@@ -62,10 +62,12 @@ export function SkillsView({ skills }: { skills: SkillDTO[] }) {
         <p className="text-sm text-faint">
           Level = demonstrated ability, not time studying.
         </p>
-        <Button variant="primary" size="sm" onClick={() => { setEditSkill(null); setCreateOpen(true); }}>
-          <Plus className="h-3.5 w-3.5" />
-          Add Skill
-        </Button>
+        {!readOnly ? (
+          <Button variant="primary" size="sm" onClick={() => { setEditSkill(null); setCreateOpen(true); }}>
+            <Plus className="h-3.5 w-3.5" />
+            Add Skill
+          </Button>
+        ) : null}
       </div>
 
       {skills.length === 0 ? (
@@ -74,9 +76,11 @@ export function SkillsView({ skills }: { skills: SkillDTO[] }) {
           title="No skills tracked."
           hint="Add the capabilities you rely on, then back them with evidence of demonstrated work."
           action={
-            <Button variant="primary" size="sm" onClick={() => { setEditSkill(null); setCreateOpen(true); }}>
-              Add your first skill
-            </Button>
+            readOnly ? undefined : (
+              <Button variant="primary" size="sm" onClick={() => { setEditSkill(null); setCreateOpen(true); }}>
+                Add your first skill
+              </Button>
+            )
           }
         />
       ) : (
@@ -93,30 +97,34 @@ export function SkillsView({ skills }: { skills: SkillDTO[] }) {
                     ) : null}
                   </div>
                   <div className="flex shrink-0 gap-0.5">
-                    <button
-                      type="button"
-                      onClick={() => openEdit(s)}
-                      aria-label={`Edit ${s.name}`}
-                      className="rounded p-1 text-faint transition-colors hover:bg-surface-2 hover:text-text"
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { setEvidenceSkill(s); }}
-                      aria-label={`Evidence for ${s.name}`}
-                      className="rounded p-1 text-faint transition-colors hover:bg-surface-2 hover:text-text"
-                    >
-                      <Link2 className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setConfirmDelete(s)}
-                      aria-label={`Delete ${s.name}`}
-                      className="rounded p-1 text-faint transition-colors hover:bg-bad/20 hover:text-bad"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
+                    {!readOnly ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => openEdit(s)}
+                          aria-label={`Edit ${s.name}`}
+                          className="rounded p-1 text-faint transition-colors hover:bg-surface-2 hover:text-text"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setEvidenceSkill(s); }}
+                          aria-label={`Evidence for ${s.name}`}
+                          className="rounded p-1 text-faint transition-colors hover:bg-surface-2 hover:text-text"
+                        >
+                          <Link2 className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDelete(s)}
+                          aria-label={`Delete ${s.name}`}
+                          className="rounded p-1 text-faint transition-colors hover:bg-bad/20 hover:text-bad"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </>
+                    ) : null}
                   </div>
                 </div>
 
@@ -135,6 +143,7 @@ export function SkillsView({ skills }: { skills: SkillDTO[] }) {
                       <button
                         key={value}
                         type="button"
+                        disabled={readOnly}
                         onClick={() => {
                           startTransition(() => {
                             void updateSkill(s.id, { name: s.name, description: (s.description ?? ""), level: value }).then(() => router.refresh());
@@ -143,7 +152,7 @@ export function SkillsView({ skills }: { skills: SkillDTO[] }) {
                         aria-label={`Set level ${value}`}
                         className={cn(
                           "h-1.5 flex-1 rounded-full transition-colors",
-                          value <= s.level ? "bg-accent" : "bg-surface-3 hover:bg-border",
+                          value <= s.level ? "bg-accent" : readOnly ? "bg-surface-3" : "bg-surface-3 hover:bg-border",
                         )}
                       />
                     ))}
@@ -175,6 +184,7 @@ export function SkillsView({ skills }: { skills: SkillDTO[] }) {
         skill={evidenceSkill}
         onClose={() => setEvidenceSkill(null)}
         refresh={() => router.refresh()}
+        readOnly={readOnly}
       />
 
       <ConfirmDialog
@@ -295,10 +305,12 @@ function EvidenceModal({
   skill,
   onClose,
   refresh,
+  readOnly,
 }: {
   skill: SkillDTO | null;
   onClose: () => void;
   refresh: () => void;
+  readOnly?: boolean;
 }) {
   const [title, setTitle] = useState("");
   const [type, setType] = useState<EvidenceType>("GITHUB");
@@ -348,18 +360,20 @@ function EvidenceModal({
                       {EVIDENCE_TYPE_LABELS[ev.type]}
                     </span>
                   </a>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      startTransition(() => {
-                        void deleteSkillEvidence(ev.id).then(refresh);
-                      });
-                    }}
-                    aria-label="Delete evidence"
-                    className="rounded p-1 text-faint transition-colors hover:bg-bad/20 hover:text-bad"
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </button>
+                  {!readOnly ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        startTransition(() => {
+                          void deleteSkillEvidence(ev.id).then(refresh);
+                        });
+                      }}
+                      aria-label="Delete evidence"
+                      className="rounded p-1 text-faint transition-colors hover:bg-bad/20 hover:text-bad"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  ) : null}
                 </li>
               ))}
             </ul>
@@ -369,55 +383,57 @@ function EvidenceModal({
             </p>
           )}
 
-          <div className="flex flex-col gap-3 border-t border-line pt-4">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="col-span-2">
-                <Label htmlFor="ev-title">Title</Label>
-                <Input
-                  id="ev-title"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="e.g. Shipped auth flow"
-                />
+          {!readOnly ? (
+            <div className="flex flex-col gap-3 border-t border-line pt-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="col-span-2">
+                  <Label htmlFor="ev-title">Title</Label>
+                  <Input
+                    id="ev-title"
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    placeholder="e.g. Shipped auth flow"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="ev-type">Type</Label>
+                  <Select value={type} onChange={(e) => setType(e.target.value as EvidenceType)}>
+                    {EVIDENCE_TYPES.map((t) => (
+                      <option key={t} value={t}>
+                        {EVIDENCE_TYPE_LABELS[t]}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+                <div>
+                  <Label htmlFor="ev-url">URL</Label>
+                  <Input
+                    id="ev-url"
+                    type="url"
+                    value={url}
+                    onChange={(e) => setUrl(e.target.value)}
+                    placeholder="https://…"
+                  />
+                </div>
+                <div className="col-span-2">
+                  <Label htmlFor="ev-desc">Description</Label>
+                  <Textarea
+                    id="ev-desc"
+                    rows={2}
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                  />
+                </div>
               </div>
-              <div>
-                <Label htmlFor="ev-type">Type</Label>
-                <Select value={type} onChange={(e) => setType(e.target.value as EvidenceType)}>
-                  {EVIDENCE_TYPES.map((t) => (
-                    <option key={t} value={t}>
-                      {EVIDENCE_TYPE_LABELS[t]}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-              <div>
-                <Label htmlFor="ev-url">URL</Label>
-                <Input
-                  id="ev-url"
-                  type="url"
-                  value={url}
-                  onChange={(e) => setUrl(e.target.value)}
-                  placeholder="https://…"
-                />
-              </div>
-              <div className="col-span-2">
-                <Label htmlFor="ev-desc">Description</Label>
-                <Textarea
-                  id="ev-desc"
-                  rows={2}
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                />
+              {error ? <p className="text-xs text-bad">{error}</p> : null}
+              <div className="flex justify-end">
+                <Button variant="primary" size="sm" onClick={submit} disabled={isPending}>
+                  {isPending ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : null}
+                  Add Evidence
+                </Button>
               </div>
             </div>
-            {error ? <p className="text-xs text-bad">{error}</p> : null}
-            <div className="flex justify-end">
-              <Button variant="primary" size="sm" onClick={submit} disabled={isPending}>
-                {isPending ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : null}
-                Add Evidence
-              </Button>
-            </div>
-          </div>
+          ) : null}
         </div>
       ) : null}
     </Modal>

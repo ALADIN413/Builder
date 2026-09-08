@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { addDays, format } from "date-fns";
 import { getDailyLog, getDistractionsForDay, getFocusSessionsForDay } from "@/lib/queries";
+import { requireUser, resolveViewer } from "@/lib/auth";
 import { toDateKey, fromDateKey, formatLong } from "@/lib/date";
 import { DISTRACTION_LABELS } from "@/lib/constants";
 import { Panel, PanelHeader } from "@/components/ui/panel";
@@ -20,23 +21,27 @@ export const metadata: Metadata = { title: "Daily Log" };
 export default async function DailyPage({
   searchParams,
 }: {
-  searchParams: Promise<{ date?: string }>;
+  searchParams: Promise<{ date?: string; view?: string }>;
 }) {
   const params = await searchParams;
   const dateKey = params.date && /^\d{4}-\d{2}-\d{2}$/.test(params.date) ? params.date : toDateKey(new Date());
   const date = fromDateKey(dateKey);
   const isToday = dateKey === toDateKey(new Date());
 
+  const current = await requireUser();
+  const { user, isSelf } = await resolveViewer(params, current);
+
   const [dailyLog, sessions, distractions] = await Promise.all([
-    getDailyLog(date),
-    getFocusSessionsForDay(date),
-    getDistractionsForDay(date),
+    getDailyLog(user.id, date),
+    getFocusSessionsForDay(user.id, date),
+    getDistractionsForDay(user.id, date),
   ]);
 
   const sessionMinutes = sessions.reduce((a, s) => a + s.durationMinutes, 0);
 
   const prevDay = toDateKey(addDays(date, -1));
   const nextDay = toDateKey(addDays(date, 1));
+const viewQs = params.view && params.view !== current.id ? `&view=${params.view}` : "";
 
   const distractionTotal = distractions.reduce((a, d) => a + d.minutes, 0);
 
@@ -52,7 +57,7 @@ export default async function DailyPage({
           )}
         </div>
         <div className="flex items-center gap-1">
-          <Link href={`/daily?date=${prevDay}`}>
+          <Link href={`/daily?date=${prevDay}${viewQs}`}>
             <Button variant="ghost" size="icon" aria-label="Previous day">
               <ChevronLeft className="h-4 w-4" />
             </Button>
@@ -60,13 +65,13 @@ export default async function DailyPage({
           <span className="min-w-28 text-center font-mono text-sm tabular text-muted">
             {format(date, "MMM d")}
           </span>
-          <Link href={`/daily?date=${nextDay}`}>
+          <Link href={`/daily?date=${nextDay}${viewQs}`}>
             <Button variant="ghost" size="icon" aria-label="Next day">
               <ChevronRight className="h-4 w-4" />
             </Button>
           </Link>
           {isToday ? null : (
-            <Link href="/daily">
+            <Link href={`/daily${params.view && params.view !== current.id ? `?view=${params.view}` : ""}`}>
               <Button variant="secondary" size="sm" className="ml-2">
                 Today
               </Button>
@@ -80,6 +85,7 @@ export default async function DailyPage({
           <DailyLogForm
             dateKey={dateKey}
             sessionMinutes={sessionMinutes}
+            readOnly={!isSelf}
             initial={{
               primaryObjective: dailyLog?.primaryObjective ?? "",
               whatWentWell: dailyLog?.whatWentWell ?? "",
@@ -99,7 +105,7 @@ export default async function DailyPage({
           <Panel>
             <PanelHeader
               title="Distractions"
-              action={<DistractionLogger dateKey={dateKey} />}
+              action={<DistractionLogger dateKey={dateKey} readOnly={!isSelf} />}
             />
             {distractions.length > 0 ? (
               <div className="flex flex-col gap-1.5">
